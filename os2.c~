@@ -1,0 +1,781 @@
+#include<sys/utsname.h>
+#include<sys/types.h>
+#include<stdlib.h>
+#include<stdio.h>
+#include<string.h>
+#include<errno.h>
+#include<unistd.h>
+#include <sys/procfs.h>
+#include<sys/stat.h>
+#include<fcntl.h>
+#include<wait.h>
+
+int parse(char *line, char **argv);
+void lis(char **argv,int flag);
+void pip_red(char *line);
+void pip_red1(char *line);
+void red(char *line);
+void red2(char *line);
+void get_status (pid_t pid);
+void sig_handler(int signum);
+void kill_it();
+void job();
+void job2(char **argv);
+void pin();
+void fg1(char **argv);
+void exe1(char **argv,int in, int out,char *input,char *output);
+
+struct pro                           					//structure to store the processes
+{
+	int pd;
+	char pname[100];
+	int s_no;
+}all[100],back[100]; 
+
+int count=1;
+int cnt=1;
+
+int main()
+{	
+	int flag=0;
+	signal(SIGTSTP, sig_handler);
+	signal(SIGCHLD,sig_handler);
+	signal(SIGINT,SIG_IGN);
+	
+	while(1)
+	{	
+		flag=0;
+		int flg=0;
+		int pflag=0;
+		char s[100],path[100];
+		char m[100];
+		char *argv[100];
+		char *user;
+		char line[100];
+		int p,c=0,h,i=0;
+		int in=0,out=0,pip=0;
+		char line1[100];
+		char *input,*output;
+		gethostname(m,100);
+		user=getenv("USER");
+		getcwd(path,100);
+		printf("<%s@%s%s:->",user,m,path);					//printing username and hostname
+		gets(line);
+		strcpy(line1,line);
+		
+		//printf("%s",line1);
+		int d=strlen(line)-1;
+		char t=line[d];
+		strcpy(all[cnt].pname,line);
+		if (t=='&')                                                            //checking for background processes
+		{
+			flag=1;
+			strcpy(back[count].pname,line);
+		}
+		c=parse(line,argv);							//parsing the input
+		for(i=0;i<strlen(line);i++)	
+		{
+			if((line[i]=='<') || (line[i]=='>'))
+				flg=1;							//checking if any redirection and pipes
+			else if(line[i]=='|')	
+				pflag=1;
+		}
+		for(i=0;i<c;i++)
+		{
+			if((strcmp(argv[i],"<")==0) || strcmp(argv[i],">")==0)
+				flg=1;
+			else if(strcmp(argv[i],"|")==0)
+				pflag=1;
+		}
+		//printf("%d%d",flg,pflag);
+		if (pflag==1)
+		{printf("ftdft");
+			pip_red1(line1);			
+		}
+		else if(flg==1 && pflag==0)
+		{//printf("yjgyg");
+			red2(line1);
+		}
+		else if(flg==0 && pflag==0)						//for all other commands without redirection and pipes
+		{
+			if (strcmp(argv[0],"quit")==0)
+		{	
+			flag=0;
+			exit(0);
+		}
+		else if(strcmp(argv[0],"pinfo")==0)
+		{
+			if(argv[1]==NULL)
+			{
+				pin();
+			}
+			else
+			{
+				h=atoi(argv[1]);
+				get_status(h);
+			}
+		}
+		else if(strcmp(argv[0],"cd")==0)
+		{
+			flag=0;	
+			chdir(argv[1]);
+		}
+		else if(strcmp(argv[0],"overkill")==0)
+		{	
+			flag=0;
+			kill_it();
+		}
+		else if(strcmp(argv[0],"jobs")==0)
+		{
+			flag=0;
+			job();
+		}
+		else if(strcmp(argv[0],"kjob")==0)
+		{
+			job2(argv);
+		}
+		else if (strcmp(argv[0],"fg")==0)
+		{
+			fg1(argv);
+		}
+		else
+		{
+			lis(argv,flag);
+		}
+		}
+	}
+	return 0;
+}
+
+void red2(char *line)									//function for only redirection
+{
+	int stdin_copy,stdout_copy;
+	stdin_copy=dup(STDIN_FILENO);
+	stdout_copy=dup(STDOUT_FILENO);
+	int gc=0,lc=0,tc=0;
+	int in,tempfd,i,j,spaces=0;
+	char *tok,*temp,*g[100],*t[100],*l[100];
+
+	tok=strtok(line,">");
+	while(tok!=NULL)
+	{
+		tok[strlen(tok)]='\0';
+		g[gc]=tok;
+		gc++;
+		tok=strtok(NULL,">");
+	}
+	g[gc++]=tok;
+
+	tok=strtok(g[0],"<");
+	while(tok!=NULL)
+	{
+		tok[strlen(tok)]='\0';
+		l[lc]=tok;
+		lc++;
+		tok=strtok(NULL,"<");
+	}
+	l[lc++]=tok;
+
+	tok=strtok(l[0]," ");
+	while(tok!=NULL)
+	{
+		tok[strlen(tok)]='\0';
+		t[tc]=tok;
+		tc++;
+		tok=strtok(NULL," ");
+	}
+	t[tc++]=tok;
+
+	if(lc >2 && gc==2)								// only input redirection is there.
+	{
+		pid_t pid;
+		in = open(l[1], O_RDONLY , 0664);					//opening the file
+		if (in < 0) 
+		{
+			perror(l[1]);							//error if it doesn't exist
+			exit(1);
+		}
+		pid = fork();
+		if (pid==0) 
+		{	
+			dup2(in, 0);							// make input stream as "in" .
+			if (execvp(t[0],t) < 0) 
+			{								//error if command doesn't exist.
+				perror("execl");
+				exit(1);
+			}
+
+		}
+		else if(pid>0)								//parent
+			wait(NULL);
+		else
+		{
+			perror("Error");
+			exit(1);
+		}
+	}
+
+	else if(gc>2 && lc==2)								// just output redirection is there.
+	{
+		pid_t pid;
+		int out;
+		out = open(g[1], O_CREAT | O_WRONLY, S_IRWXU);
+		if (out < 0) 
+		{
+			perror(g[1]);
+			exit(1);
+		}
+		pid = fork();
+		if (pid==0) 
+		{									//child
+			dup2(out, STDOUT_FILENO);					// now output is "out" instead of STDOUT_FILENO(stdout)
+			if (execvp(t[0],t) < 0) 
+			{
+				perror("execl");
+				exit(1);
+			}
+		}
+		else if(pid>0)								//parent
+			wait(NULL);
+		else
+		{
+			perror("Error");
+			exit(1);
+		}
+	}
+
+										// both input and output redirection is there 
+
+	else	
+	{
+		pid_t pid;
+		int out,in;
+		out = open(g[1], O_CREAT | O_WRONLY, S_IRWXU);
+		in = open(l[1], O_RDONLY , 0664);
+
+		if (out < 0) 
+		{
+			perror(g[1]);
+			exit(1);
+		}
+		if(in <0)
+		{
+			perror(l[1]);
+			exit(1);
+		}
+		pid = fork();
+		if (pid==0) 
+		{										//child
+			dup2(in,STDIN_FILENO);							// in is the new stdin
+			dup2(out, STDOUT_FILENO);						//out is the new stdout
+			if (execvp(t[0],t) < 0) 
+			{	
+				perror("execl");
+				exit(1);
+			}
+		}
+		else if(pid>0)									//parent
+			wait(NULL);
+		else
+		{
+			perror("Error");
+			exit(1);
+		}
+	}
+	dup2(stdin_copy, 0);								//restoring stdout and stdin back , closing file descriptors.
+	dup2(stdout_copy, 1);
+	close(stdin_copy);
+	close(stdout_copy);
+
+}
+
+
+		
+void pip_red1(char *line)
+{
+	char *p[100], *c[100],*n[100];
+	int fd1[2], fd[2];
+	int pc=0, cc=0,nc=0;
+	int inflag,oflag;
+	int i,j;
+	int status;
+	int in,out; 
+	pid_t pid;
+
+	char *tok=strtok(line,"|");
+	while(tok!=NULL)
+	{
+		tok[strlen(tok)]='\0';
+		p[pc]=tok;
+		pc++;
+		tok=strtok(NULL,"|");
+	}
+	p[pc++]=tok;
+	pc--;								
+
+	int stdin_copy, stdout_copy;							// creating copy of stdin and stdout to restore later on
+	stdin_copy=dup(STDIN_FILENO);	
+	stdout_copy=dup(STDOUT_FILENO);
+
+	for(i = 0; i < pc; i++) 					
+	{
+		inflag=0,oflag=0;
+		int ind=-1,oind=-1;
+		for(j=0;j<strlen(p[i]);j++)
+		{
+			if(p[i][j]=='<')						// check if it has input redirection
+			{
+				inflag=1;
+				ind=i;
+			}
+			if(p[i][j]=='>')						//check if it has output redirection
+			{
+				oflag=1;
+				oind=i;
+			}
+		}
+	cc = 0;										 // argument count
+
+											// parsing in case of inflag
+
+	if(inflag==1)
+	{
+
+		tok=strtok(p[i],"<");							// parsing , tokenising along <
+		while(tok!=NULL)
+		{
+			tok[strlen(tok)]='\0';
+			c[cc]=tok;
+			cc++;
+			tok=strtok(NULL,"<");
+		}
+		c[cc++]=tok;								//c[1] is a file name.
+		nc=0;
+		tok=strtok(c[0]," ");						// tokenising c[0] , which is a command and may have flags .
+		while(tok!=NULL)
+		{
+			tok[strlen(tok)]='\0';
+			n[nc]=tok;
+			nc++;
+			tok=strtok(NULL," ");
+		}
+		n[nc++]=tok;							// n has all the flags in it (along with the command name).
+		in = open(c[1], O_RDONLY , 0664);				// open the file with fd = in.
+		if (in < 0) 
+		{
+			perror(c[1]);						// error if file doesn't exist.
+			exit(1);
+		}
+		dup2(in, STDIN_FILENO);
+	}
+
+										/* parsing in case of oflag */
+
+	else if(oflag==1)
+	{
+		tok=strtok(p[i],">");
+		while(tok!=NULL)
+		{
+			tok[strlen(tok)]='\0';
+			c[cc]=tok;
+			cc++;
+			tok=strtok(NULL,">");
+		}
+		c[cc++]=tok;
+		c[2]=NULL;
+		nc=0;
+
+		tok=strtok(c[0]," ");
+		while(tok!=NULL)
+		{
+			tok[strlen(tok)]='\0';
+			n[nc]=tok;
+			nc++;
+			tok=strtok(NULL," ");
+		}
+		n[nc++]=tok;
+
+		out = open(c[1], O_CREAT | O_WRONLY, S_IRWXU);
+		if (out < 0) 
+		{
+			perror(c[1]);
+			exit(1);
+		}
+		dup2(out, STDOUT_FILENO);
+	}
+
+											/* Parsing command & arguments in case of only pipes*/
+	else
+	{
+		tok=strtok(p[i]," ");
+		while(tok!=NULL)
+		{
+			tok[strlen(tok)]='\0';
+			c[cc]=tok;
+			cc++;
+			tok=strtok(NULL," ");
+		}
+		c[cc++]=tok;
+	}
+
+												// to execute all the remaining commands
+	if(i < pc-1)
+		pipe(fd1); 									// create a pipe
+	pid = fork();
+
+	if(i>0 && i<pc-1)									//except first and last commands
+	{
+		dup2(fd[0], 0); 								//fd[0] is the new stdin; ie writes happen at fd[0]
+		close(fd[1]);
+		close(fd[0]);
+		}
+	else if(i==pc-1)									//for last command.
+	{
+		dup2(fd[0], 0); 								//fd[0] is the new stdin; ie writes happen at fd[0]
+		close(fd[1]);
+		close(fd[0]);
+	}
+
+	if(pid == 0) 
+	{
+		if(i==0)
+		{
+			dup2(fd1[1], 1); 							// stdout goes into fd1[1]
+			close(fd1[0]);
+			close(fd1[1]);
+		}
+
+		if(i>0 && i<pc-1)
+		{
+			dup2(fd1[1], 1); 							// stdout goes into fd1[1]
+			close(fd1[0]);
+			close(fd1[1]);
+
+		}
+		if((inflag==0) && (oflag==0))							// normal execvp with c[0] and c as input.
+		{
+			if(execvp(c[0], c)<0)
+			{
+				printf("Error. Command not found: %s\n", c[0]);
+				exit(1);
+			}
+		}
+		if(oflag==1)									// execvp with c[0] nad n as input. ( n has flags)
+		{
+			if (execvp(c[0],n) < 0) 
+			{
+				perror("execvp");
+				exit(1);
+			}
+		}
+		if(inflag==1)									// execvp with c[0] and n as input.
+		{
+			if (execvp(c[0],n) < 0) 
+			{
+				perror("execvp");
+				exit(1);
+			}
+		}
+	}	
+
+	else 
+	{	
+		waitpid(pid, &status, 0);							// wait for each child to end
+
+		if(i < pc-1)
+		{
+			fd[0] = fd1[0];
+			fd[1] = fd1[1];
+		}
+	}
+}
+
+
+	close(fd[0]);
+	close(fd1[0]);
+	close(fd[1]);
+	close(fd1[1]);
+												// restore stdin, stdout
+	dup2(stdin_copy, 0);
+	dup2(stdout_copy, 1);
+	close(stdin_copy);
+	close(stdout_copy);
+}
+int parse(char *line,char **argv)								//function to parse the input
+{
+	int i = 0;
+	char *arg;
+    	arg = strtok(line, " ");
+    	while (arg != NULL) 
+	{
+        	*argv = arg;
+        	arg = strtok(NULL, " ");
+        	*argv++;
+		i++;
+	}
+	*argv='\0';
+	return i;
+}
+
+
+
+
+void lis(char **argv,int flag)
+{
+	pid_t pid;
+	int status;
+	pid=fork();
+	int fd;
+	fd=open("out.txt",O_RDWR | O_CREAT);
+	if(pid<0)
+	{
+		perror("child is not created");
+		exit(0);
+	}
+	else if(pid==0)
+	{
+		if (flag==0)
+		{
+			execvp(*argv,argv);
+		}
+		else
+		{
+			all[cnt].pd=pid;
+			all[cnt].s_no=cnt;
+			cnt++;
+			dup2(fd,STDOUT_FILENO);
+			exit(1);
+		}
+
+	}
+	else
+	{
+		if(flag==0)
+		{
+			wait(&status);
+		}
+		else
+		{
+			
+			all[cnt].pd=pid;			
+			all[cnt].s_no=cnt;
+			cnt++;
+			back[count].pd=pid;			
+			back[count].s_no=count;
+			count++;
+			signal(SIGCHLD,sig_handler);
+			flag=0;
+		}
+	}
+
+	
+}
+
+
+void kill_it()
+{
+	int i=0,j;
+	for(i=0;i<count;i++)
+	{
+	signal(SIGKILL,sig_handler);
+	back[i].pname[100]=' ';
+	back[i].s_no=0;
+	for(j=0;j<cnt;j++)
+	{
+		if(back[j].pd==back[i].pd)
+		{
+			all[i].pd=0;
+			all[i].pname[100]=' ';
+			all[i].s_no=0;
+		}
+	}
+	back[i].pd=0;
+	}
+}
+
+void job2(char **argv)
+{
+	int a,b,i,j;
+	a=atoi(argv[1]);
+	b=atoi(argv[2]);
+	for(i=1;i<cnt;i++)
+	{
+		if(a==all[i].s_no)
+		{
+			kill(all[i].pd,b);
+			for(j=1;j<count;j++)
+			{
+				if(all[i].pd==back[j].pd)
+				{
+					back[i].pd=0;
+					back[i].pname[100]=' ';
+					back[i].s_no=0;
+				}
+			}
+		}
+	}
+	
+}
+
+void job()
+{
+	int i=1;
+	for(i=1;i<count;i++)
+	{	
+		if(back[i].pd!=0)
+		{
+		printf("[%d] %s [%d]\n",back[i].s_no,back[i].pname,back[i].pd);
+		}
+	}
+}
+
+void fg1(char **argv)
+{
+	int a;
+	int i;
+	int f=0;
+	a=atoi(argv[1]);
+	for (i=1;i<count;i++)
+	{
+		if(a==back[i].s_no)
+		{
+			f=1;
+			break;
+		}
+	}
+		if (f==1)
+		{
+			execvp(*argv,argv);
+			back[i].pd=0;
+			back[i].pname[100]=' ';
+			back[i].s_no=0;
+		}
+		else
+		{
+			perror("No such process exists\n");
+		}
+		
+}
+
+void pin()
+{
+	int i;
+	for(i=1;i<cnt;i++)
+	{	
+		if(all[i].pd!=0)
+			get_status(all[i].pd);
+	}
+}
+
+void child_handler(int signum)
+{
+	int pid;
+	pid = waitpid(WAIT_ANY, NULL, WNOHANG);
+	if(pid != -1)
+	{
+		fflush(stdin);
+		fflush(stdout);		
+	}
+	signal(SIGCHLD, child_handler);
+	fflush(stdin);
+	fflush(stdout);
+	return;
+}
+
+void exe1(char **argv,int in, int out,char *input,char*output)
+{
+	int fd;
+	int pid = fork();
+	//int current_out;
+
+	/*if (in==1 && out==0)
+	{ 
+    		fd = open(input, O_RDONLY);
+    		dup2(fd, STDIN_FILENO);
+    		in = 0;
+    		current_out = dup(0);
+	}
+
+	if (out==1 && in==0) 
+	{ 
+    		fd = creat(output, 0644);
+    		dup2(fd, STDOUT_FILENO);
+   		 out = 0;
+    		current_out = dup(1);
+	}*/
+
+
+	if (pid<0)
+	{
+    		perror("fork");
+	} 
+	else if (pid == 0) 
+	{       
+		if(in)
+		{
+			fd = open(input, O_CREAT | O_RDONLY , S_IREAD | S_IWRITE);
+             		dup2(fd, STDIN_FILENO);
+			close(fd);
+         		if (execvp(*argv, argv) < 0)
+             			{	
+					perror("Error");
+					_exit(0);
+				}
+		}
+		if(out)
+		{
+			fd = open(output, O_CREAT | O_WRONLY | O_TRUNC, S_IRWXU);
+        	 	dup2(fd, STDOUT_FILENO);
+
+         		if (execvp(*argv, argv) < 0) 
+				{
+             				perror("Error");
+					_exit(0);	
+         			} 
+			close(fd); 	
+		}
+         }
+	else 
+	{
+    		waitpid(pid, 0, 0);
+    		//dup2(current_out, 1);
+    		//free(argv);
+	}
+}
+
+void sig_handler(int signum)
+{
+	if(signum==2 || signum==20 || signum ==3)
+	{
+		fflush(stdout);
+		printf("\n");
+		fflush(stdout);
+		signal(SIGINT, sig_handler);
+		signal(SIGQUIT, sig_handler);
+		signal(SIGTSTP,sig_handler);
+	}
+	return;
+}
+
+void get_status (pid_t pid)
+{
+  char procpath[100];
+  char buf[100];
+  int pfd;
+  char State[100];
+  char Name[100];
+  prstatus_t * pms;
+  FILE *proc;
+
+
+    sprintf(procpath, "/proc/%d/status", pid);
+
+    proc = fopen(procpath,"r");
+    if (proc) {
+        fgets(buf,256,proc); sscanf(buf,"Name:\t%s",Name);
+        fgets(buf,256,proc); sscanf(buf,"State:\t%c",State);
+       }
+    printf("pid: %d\n",pid);
+    printf("Executable path:%s\n",Name);
+    printf("Process State:%s\n",State);
+}
